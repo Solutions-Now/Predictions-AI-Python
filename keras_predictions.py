@@ -93,7 +93,7 @@ class KerasPredictions:
 
         # Train the model
         model1.fit(self.X_train, self.y_train, epochs=100, validation_data=(self.X_val, self.y_val),
-                   callbacks=[cp, es, lr], batch_size=32)
+                   callbacks=[cp, lr], batch_size=32)
 
     def train_with_best_batch_size(self):
         X, y = self.df_to_X_y()
