@@ -10,8 +10,13 @@ df_index = df.index
 
 # Selecting the column for prediction
 
-df = df['TOTAL_INFLOW'].values.reshape(-1, 1)
+# Selecting the columns for prediction (e.g., TOTAL_INFLOW, TOTAL_OUTFLOW, DAM_DAILY_LEVEL)
+df = df[['TOTAL_INFLOW', 'TOTAL_OUTFLOW', 'DAM_DAILY_LEVEL']].values
+
+# df = df['TOTAL_INFLOW'].values.reshape(-1, 1)
 
 predictions = KerasPredictions(df=df, df_index=df_index)
 
-predictions.train_model(model_name='dam_inflow')
+# predictions.train_model(model_name='dam_inflow')
+
+predictions.get_predictions(model_name='dam_inflow')
