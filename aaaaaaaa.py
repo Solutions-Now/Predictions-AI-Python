@@ -1,14 +1,15 @@
 import json
+
 import numpy as np
 import pandas as pd
 from dateutil.relativedelta import relativedelta
 from keras import Sequential
-from keras.callbacks import ModelCheckpoint, EarlyStopping, ReduceLROnPlateau
-from keras.layers import LSTM, GRU, Dropout, Dense, LeakyReLU, Conv1D, MaxPooling1D, Flatten
-from keras.losses import Huber
-from keras.optimizers import Adam
-from keras.models import load_model
-from keras.src.layers import InputLayer
+from keras.src.callbacks import ModelCheckpoint, EarlyStopping, ReduceLROnPlateau
+from keras.src.layers import LSTM, InputLayer, Dropout, Dense, LeakyReLU
+from keras.src.losses import MeanSquaredError
+from keras.src.metrics import RootMeanSquaredError
+from keras.src.optimizers import Adam
+from keras.src.saving import load_model
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler
 
@@ -17,7 +18,7 @@ from steps_range import StepsRange
 
 class KerasPredictions:
 
-    def __init__(self, df, df_index, allowed_dam_daily_levels=None, window_size=10):
+    def __init__(self, df, df_index, allowed_dam_daily_levels = None, window_size=10):
         self.df_index = df_index
         self.scaler = MinMaxScaler()
         self.df = df
@@ -43,23 +44,31 @@ class KerasPredictions:
         else:
             model.add(InputLayer(input_shape=(self.window_size, X.shape[2])))
 
-        # Adding Convolutional Layers
-        model.add(Conv1D(filters=64, kernel_size=2, activation='relu'))
-        model.add(MaxPooling1D(pool_size=2))
-        model.add(Dropout(0.3))
-
         model.add(LSTM(128, return_sequences=True))
-        model.add(Dropout(0.3))
-        model.add(GRU(64, return_sequences=True))
-        model.add(Dropout(0.3))
-        model.add(LSTM(32))
-        model.add(Dense(64))
-        model.add(LeakyReLU(alpha=0.1))
-
+        model.add(Dropout(0.2))
+        model.add(LSTM(64))
+        model.add(Dense(32, activation='relu'))
         if not multiple_features:
-            model.add(Dense(1))
+            model.add(Dense(1, activation='linear'))
         else:
-            model.add(Dense(X.shape[2]))
+            model.add(Dense(X.shape[2], activation='linear'))
+
+        # if not multiple_features:
+        #     model.add(InputLayer(input_shape=(self.window_size, 1)))
+        # else:
+        #     model.add(InputLayer(input_shape=(self.window_size, X.shape[2])))
+        #
+        # model.add(LSTM(128, return_sequences=True))
+        # model.add(Dropout(0.3))
+        # model.add(LSTM(64, return_sequences=True))
+        # model.add(Dropout(0.3))
+        # model.add(LSTM(32))
+        # model.add(Dense(64))
+        # model.add(LeakyReLU(alpha=0.1))
+        # if not multiple_features:
+        #     model.add(Dense(1))
+        # else:
+        #     model.add(Dense(X.shape[2]))
 
         # Display the model summary
         model.summary()
@@ -68,16 +77,17 @@ class KerasPredictions:
         X_train, X_temp, y_train, y_temp = train_test_split(X, y, test_size=0.2, random_state=42)
         X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.5, random_state=42)
 
-        # Compile the model with Huber Loss
+        # Compile the model
         cp = ModelCheckpoint(f'assets/models/{model_name}.keras', save_best_only=True)
         es = EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=20)
         lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=0.00001)
-        model.compile(loss=Huber(), optimizer=Adam(learning_rate=0.0001), metrics=['mae'])
-
+        model.compile(loss=MeanSquaredError(), optimizer=Adam(learning_rate=0.0001), metrics=[RootMeanSquaredError()])
         # Train the model
-        model.fit(X_train, y_train, epochs=150, validation_data=(X_val, y_val), callbacks=[cp, es, lr], batch_size=8)
+        model.fit(X_train, y_train, epochs=150, validation_data=(X_val, y_val),
+                  callbacks=[cp, es, lr], batch_size=16)
 
     def get_predictions(self, model_name, multiple_features=False, steps_range=StepsRange.DAYS, future_steps=30):
+
         # Load the best model
         model = load_model(f'assets/models/{model_name}.keras')
 
@@ -87,6 +97,9 @@ class KerasPredictions:
 
         # Assume your test set's last date is the starting point for future predictions
         last_date = self.df_index[-1]  # Last date in the dataset
+
+        # Number of future steps to predict (30 days)
+        # future_steps = 30
 
         # Use the last window of data from your test set as the starting point
         last_window = X_test[-1]
@@ -109,7 +122,7 @@ class KerasPredictions:
             else:
                 last_window = np.append(last_window[1:], [next_prediction], axis=0)
 
-        # Inverse transform the predictions to the original scale
+        # Inverse transform the predictions to original scale
         if not multiple_features:
             future_predictions_original_scale = self.scaler.inverse_transform(
                 np.array(future_predictions).reshape(-1, 1)).flatten()
@@ -166,12 +179,11 @@ class KerasPredictions:
         # Print the JSON formatted predictions
         print(results_json)
 
-    def get_closest_dam_daily_level(self, predicted_value):
-        # Round the predicted value to 1 decimal place
-        predicted_value = round(predicted_value, 1)
-        # Calculate the absolute difference between the predicted value and each allowed dam daily level
-        differences = np.abs(np.array(self.allowed_dam_daily_levels) - predicted_value)
-        # Find the index of the closest allowed value
-        closest_index = np.argmin(differences)
-        # Return the closest allowed value
-        return self.allowed_dam_daily_levels[closest_index]
+    def get_closest_dam_daily_level(self, prediction):
+        # Round the prediction to one decimal place
+        rounded_prediction = round(prediction, 1)
+        if self.allowed_dam_daily_levels is None: return rounded_prediction
+        allowed_values = self.allowed_dam_daily_levels
+        # Find the closest value in allowed_values
+        min_value = min(allowed_values, key=lambda x: abs(x - rounded_prediction))
+        return round(min_value, 1)
