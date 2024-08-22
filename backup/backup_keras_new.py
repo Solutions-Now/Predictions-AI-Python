@@ -16,12 +16,11 @@ from sklearn.preprocessing import MinMaxScaler
 
 class KerasPredictions:
 
-    def __init__(self, df, df_index, allowed_dam_daily_levels, window_size=10, ):
+    def __init__(self, df, df_index, window_size=10):
         self.df_index = df_index
         self.scaler = MinMaxScaler()
         self.df = df
         self.window_size = window_size
-        self.allowed_dam_daily_levels = allowed_dam_daily_levels
 
     def df_to_X_y(self):
         self.df = self.scaler.fit_transform(self.df)
@@ -32,26 +31,24 @@ class KerasPredictions:
             y.append(self.df[i + self.window_size])
         return np.array(X), np.array(y)
 
-    def train_model(self, model_name, multiple_features=False):
+    def train_model(self, model_name,features_number = None):
         X, y = self.df_to_X_y()
-
-        print(f'X.shape: ${X.shape}')
 
         # Build the model
         model = Sequential()
-        if multiple_features == False:
+        if features_number == None:
             model.add(InputLayer(input_shape=(self.window_size, 1)))
         else:
-            model.add(InputLayer(input_shape=(self.window_size, X.shape[2])))
+            model.add(InputLayer(input_shape=(self.window_size, X.shape[features_number - 1])))
 
         model.add(LSTM(128, return_sequences=True))
         model.add(Dropout(0.2))
         model.add(LSTM(64))
         model.add(Dense(32, activation='relu'))
-        if multiple_features == False:
+        if features_number == None:
             model.add(Dense(1, activation='linear'))
         else:
-            model.add(Dense(X.shape[2], activation='linear'))
+            model.add(Dense(X.shape[features_number - 1], activation='linear'))
 
         # Display the model summary
         model.summary()
@@ -67,9 +64,9 @@ class KerasPredictions:
         model.compile(loss=MeanSquaredError(), optimizer=Adam(learning_rate=0.0001), metrics=[RootMeanSquaredError()])
         # Train the model
         model.fit(X_train, y_train, epochs=100, validation_data=(X_val, y_val),
-                  callbacks=[cp, es, lr], batch_size=16)
+                  callbacks=[cp, es, lr], batch_size=32)
 
-    def get_predictions(self, model_name, multiple_features=False):
+    def get_predictions(self, model_name,features_number = None):
 
         # Load the best model
         model = load_model(f'assets/models/{model_name}.keras')
@@ -92,7 +89,7 @@ class KerasPredictions:
 
         for _ in range(future_steps):
             # Predict the next set of values
-            if multiple_features == False:
+            if features_number == None:
                 next_prediction = model.predict(last_window[np.newaxis, :, :]).flatten()[0]
             else:
                 next_prediction = model.predict(last_window[np.newaxis, :, :]).flatten()
@@ -100,22 +97,22 @@ class KerasPredictions:
             future_predictions.append(next_prediction)
 
             # Update the window with the new prediction
-            if multiple_features == False:
+            if features_number == None:
                 last_window = np.append(last_window[1:], [[next_prediction]], axis=0)
             else:
                 last_window = np.append(last_window[1:], [next_prediction], axis=0)
 
         # Inverse transform the predictions to original scale
-        if multiple_features == False:
-            future_predictions_original_scale = self.scaler.inverse_transform(
-                np.array(future_predictions).reshape(-1, 1)).flatten()
+        if features_number == None:
+            future_predictions_original_scale = self.scaler.inverse_transform(np.array(future_predictions).reshape(-1, 1)).flatten()
         else:
             future_predictions_original_scale = self.scaler.inverse_transform(np.array(future_predictions))
 
         # Generate corresponding future dates (daily increments)
         future_dates = [last_date + relativedelta(days=i) for i in range(1, future_steps + 1)]
 
-        if multiple_features == False:
+
+        if features_number == None:
             # Convert predictions to float64 and create a dictionary of date-value pairs
             future_result = {str(date.date()): float(value) for date, value in
                              zip(future_dates, future_predictions_original_scale)}
@@ -123,43 +120,27 @@ class KerasPredictions:
         else:
             # Create a DataFrame for future predictions
             future_result = pd.DataFrame(data=future_predictions_original_scale,
-                                         columns=['TOTAL_INFLOW', 'TOTAL_OUTFLOW', 'DAM_DAILY_LEVEL', 'MAX_CAPACITY',
-                                                  'TOTAL_VOLUME'])
+                                         columns=['TOTAL_INFLOW', 'TOTAL_OUTFLOW', 'DAM_DAILY_LEVEL'])
             future_result['Date'] = future_dates
             # Convert future predictions to a dictionary
-            future_result_dict = {}
-            for i in range(future_steps):
-                date_str = str(future_dates[i])
-                total_inflow = float(future_predictions_original_scale[i][0])
-                total_outflow = float(future_predictions_original_scale[i][1])
-                dam_daily_level = self.get_closest_dam_daily_level(float(future_predictions_original_scale[i][2]))
-                max_capacity = float(future_predictions_original_scale[i][3])
-                total_volume = float(future_predictions_original_scale[i][4])
-                storage_percentage = (total_volume / max_capacity) * 100
-                future_result_dict[date_str] = {
-                    "TOTAL_INFLOW": total_inflow,
-                    "TOTAL_OUTFLOW": total_outflow,
-                    "DAM_DAILY_LEVEL": dam_daily_level,
-                    "MAX_CAPACITY": max_capacity,
-                    "TOTAL_VOLUME": total_volume,
-                    "STORAGE_PERCENTAGE": storage_percentage
+            future_result_dict = {
+                str(future_dates[i]): {
+                    "TOTAL_INFLOW": float(future_predictions_original_scale[i][0]),
+                    "TOTAL_OUTFLOW": float(future_predictions_original_scale[i][1]),
+                    "DAM_DAILY_LEVEL": float(future_predictions_original_scale[i][2])
                 }
+                for i in range(future_steps)
+            }
 
             # Combine all into a single dictionary
             results_dict = {
                 "Future Predictions (Next 30 Days)": future_result_dict
             }
 
+
+
         # Convert the dictionary to a JSON string
         results_json = json.dumps(results_dict, indent=4)
 
         # Print the JSON formatted predictions
         print(results_json)
-
-    def get_closest_dam_daily_level(self, prediction):
-        # Round the prediction to one decimal place
-        rounded_prediction = round(prediction, 1)
-        allowed_values = self.allowed_dam_daily_levels
-        # Find the closest value in allowed_values
-        min_value = min(allowed_values, key=lambda x: abs(x - rounded_prediction))
-        return round(min_value, 1)
