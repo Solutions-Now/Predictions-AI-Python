@@ -23,42 +23,42 @@ class KerasPredictions:
         self.window_size = window_size
         self.allowed_dam_daily_levels = allowed_dam_daily_levels
 
-    def df_to_X_y(self):
+    def df_to_x_y(self):
         self.df = self.scaler.fit_transform(self.df)
-        X = []
+        x = []
         y = []
         for i in range(len(self.df) - self.window_size):
-            X.append(self.df[i:i + self.window_size])
+            x.append(self.df[i:i + self.window_size])
             y.append(self.df[i + self.window_size])
-        return np.array(X), np.array(y)
+        return np.array(x), np.array(y)
 
     def train_model(self, model_name, multiple_features=False):
-        X, y = self.df_to_X_y()
+        x, y = self.df_to_x_y()
 
-        print(f'X.shape: ${X.shape}')
+        print(f'x.shape: ${x.shape}')
 
         # Build the model
         model = Sequential()
-        if multiple_features == False:
+        if not multiple_features:
             model.add(InputLayer(input_shape=(self.window_size, 1)))
         else:
-            model.add(InputLayer(input_shape=(self.window_size, X.shape[2])))
+            model.add(InputLayer(input_shape=(self.window_size, x.shape[2])))
 
         model.add(LSTM(128, return_sequences=True))
         model.add(Dropout(0.2))
         model.add(LSTM(64))
         model.add(Dense(32, activation='relu'))
-        if multiple_features == False:
+        if not multiple_features:
             model.add(Dense(1, activation='linear'))
         else:
-            model.add(Dense(X.shape[2], activation='linear'))
+            model.add(Dense(x.shape[2], activation='linear'))
 
         # Display the model summary
         model.summary()
 
         # Split the data into training, validation, and test sets
-        X_train, X_temp, y_train, y_temp = train_test_split(X, y, test_size=0.2, random_state=42)
-        X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.5, random_state=42)
+        x_train, x_temp, y_train, y_temp = train_test_split(x, y, test_size=0.2, random_state=42)
+        x_val, x_test, y_val, y_test = train_test_split(x_temp, y_temp, test_size=0.5, random_state=42)
 
         # Compile the model
         cp = ModelCheckpoint(f'assets/models/{model_name}.keras', save_best_only=True)
@@ -66,7 +66,7 @@ class KerasPredictions:
         lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=0.00001)
         model.compile(loss=MeanSquaredError(), optimizer=Adam(learning_rate=0.0001), metrics=[RootMeanSquaredError()])
         # Train the model
-        model.fit(X_train, y_train, epochs=100, validation_data=(X_val, y_val),
+        model.fit(x_train, y_train, epochs=100, validation_data=(x_val, y_val),
                   callbacks=[cp, es, lr], batch_size=16)
 
     def get_predictions(self, model_name, multiple_features=False):
@@ -74,9 +74,9 @@ class KerasPredictions:
         # Load the best model
         model = load_model(f'assets/models/{model_name}.keras')
 
-        X, y = self.df_to_X_y()
-        X_train, X_temp, y_train, y_temp = train_test_split(X, y, test_size=0.2, random_state=42)
-        X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.5, random_state=42)
+        x, y = self.df_to_x_y()
+        x_train, x_temp, y_train, y_temp = train_test_split(x, y, test_size=0.2, random_state=42)
+        x_val, x_test, y_val, y_test = train_test_split(x_temp, y_temp, test_size=0.5, random_state=42)
 
         # Assume your test set's last date is the starting point for future predictions
         last_date = self.df_index[-1]  # Last date in the dataset
@@ -85,14 +85,14 @@ class KerasPredictions:
         future_steps = 30
 
         # Use the last window of data from your test set as the starting point
-        last_window = X_test[-1]
+        last_window = x_test[-1]
 
         # Initialize a list to store future predictions
         future_predictions = []
 
         for _ in range(future_steps):
             # Predict the next set of values
-            if multiple_features == False:
+            if not multiple_features:
                 next_prediction = model.predict(last_window[np.newaxis, :, :]).flatten()[0]
             else:
                 next_prediction = model.predict(last_window[np.newaxis, :, :]).flatten()
@@ -100,13 +100,13 @@ class KerasPredictions:
             future_predictions.append(next_prediction)
 
             # Update the window with the new prediction
-            if multiple_features == False:
+            if not multiple_features:
                 last_window = np.append(last_window[1:], [[next_prediction]], axis=0)
             else:
                 last_window = np.append(last_window[1:], [next_prediction], axis=0)
 
         # Inverse transform the predictions to original scale
-        if multiple_features == False:
+        if not multiple_features:
             future_predictions_original_scale = self.scaler.inverse_transform(
                 np.array(future_predictions).reshape(-1, 1)).flatten()
         else:
@@ -115,7 +115,7 @@ class KerasPredictions:
         # Generate corresponding future dates (daily increments)
         future_dates = [last_date + relativedelta(days=i) for i in range(1, future_steps + 1)]
 
-        if multiple_features == False:
+        if not multiple_features:
             # Convert predictions to float64 and create a dictionary of date-value pairs
             future_result = {str(date.date()): float(value) for date, value in
                              zip(future_dates, future_predictions_original_scale)}

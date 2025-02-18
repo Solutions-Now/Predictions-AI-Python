@@ -1,0 +1,13 @@
+pandas~=2.2.3
+python-dateutil~=2.9.0.post0
+keras~=3.8.0
+scikit-learn~=1.6.1
+prophet~=1.1.6
+pip~=25.0
+wheel~=0.41.2
+protobuf~=5.29.3
+pillow~=11.1.0
+statsmodels~=0.14.4
+matplotlib~=3.9.4
+pmdarima
+numpy
